@@ -107,6 +107,13 @@ pub extern "user32" fn PostQuitMessage(
     val: i32,
 ) callconv(.winapi) void;
 
+pub extern "user32" fn PostMessageW(
+    hWnd: ?WindowHandle,
+    Msg: u32,
+    wParam: usize,
+    lParam: isize,
+) callconv(.winapi) Bool;
+
 pub extern "user32" fn PostThreadMessageW(
     idThread: u32,
     Msg: u32,
@@ -327,6 +334,7 @@ pub extern "user32" fn UpdateWindow(
 ) callconv(.winapi) bool;
 
 pub extern "dwmapi" fn DwmFlush() callconv(.winapi) isize;
+pub extern "gdi32" fn GdiFlush() callconv(.winapi) Bool;
 
 pub extern "gdi32" fn InvalidateRect(
     window_handle: ?WindowHandle,
@@ -387,6 +395,22 @@ pub extern "user32" fn SelectObject(
 pub extern "gdi32" fn DeleteObject(
     handle: ?Bitmap,
 ) callconv(.winapi) bool;
+
+pub extern "gdi32" fn StretchDIBits(
+    hdc: ?DeviceContext,
+    xDest: i32,
+    yDest: i32,
+    DestWidth: i32,
+    DestHeight: i32,
+    xSrc: i32,
+    ySrc: i32,
+    SrcWidth: i32,
+    SrcHeight: i32,
+    lpBits: [*]const u8,
+    lpbmi: *const BitmapInfo,
+    iUsage: DIBUsage,
+    rop: RasterOperation,
+) callconv(.winapi) i32;
 
 pub extern "gdi32" fn CreateDIBSection(
     handle: ?DeviceContext,
