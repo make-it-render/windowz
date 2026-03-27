@@ -1,10 +1,8 @@
-# mir-win32
+# windowz
 
 Low-level Win32 API bindings for Zig.
 
 Provides direct access to Win32 window management, GDI rendering, and input handling with dynamic DLL loading -- no build-time Windows SDK dependency.
-
-> **Note:** Most users should prefer [mir-anywindow](../mir-anywindow) for cross-platform window management. Use mir-win32 directly only when you need low-level Win32 API access.
 
 ## Features
 
@@ -22,7 +20,7 @@ Provides direct access to Win32 window management, GDI rendering, and input hand
 ### Install
 
 ```sh
-zig fetch --save git+https://github.com/make-it-render/mir-win32
+zig fetch --save git+https://github.com/make-it-render/windowz
 ```
 
 ### build.zig
