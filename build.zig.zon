@@ -2,6 +2,6 @@
     .name = .windowz,
     .fingerprint = 0x9a3b3d3fc52bc5b3,
     .version = "0.0.0",
-    .paths = .{"src"},
+    .paths = .{ "src", "build.zig", "build.zig.zon" },
     .dependencies = .{},
 }
