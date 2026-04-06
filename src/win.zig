@@ -159,6 +159,14 @@ pub const CursorName = enum(u32) {
     Arrow = 32512,
     Beam = 32513,
     Wait = 32514,
+    Cross = 32515,
+    SizeNWSE = 32642,
+    SizeNESW = 32643,
+    SizeWE = 32644,
+    SizeNS = 32645,
+    SizeAll = 32646,
+    No = 32648,
+    Hand = 32649,
 };
 
 pub const WindowClass = extern struct {
@@ -255,6 +263,7 @@ pub const MessageType = enum(u32) {
     WM_XBUTTONUP = 0x020C,
     WM_XBUTTONDBLCLK = 0x02D,
     WM_MOUSEHWHEEL = 0x020E,
+    WM_SETCURSOR = 0x0020,
     WM_ERASEBKGND = 0x0014,
     WM_DPICHANGED = 0x02E0,
     _,
@@ -459,6 +468,23 @@ pub extern "user32" fn GetDpiForWindow(
     hwnd: ?*anyopaque,
 ) callconv(.winapi) u32;
 
+pub extern "user32" fn ClipCursor(
+    rect: ?*const Rect,
+) callconv(.winapi) i32;
+
+pub extern "user32" fn ScreenToClient(
+    hwnd: ?WindowHandle,
+    point: *Point,
+) callconv(.winapi) i32;
+
+pub extern "user32" fn ClientToScreen(
+    hwnd: ?WindowHandle,
+    point: *Point,
+) callconv(.winapi) i32;
+
+pub const HTCLIENT: isize = 1;
+pub const WHEEL_DELTA: i32 = 120;
+
 pub extern "user32" fn GetKeyState(nVirtKey: c_int) callconv(.winapi) i16;
 
 pub extern "user32" fn SetProcessDPIAware() callconv(.winapi) Bool;
@@ -553,3 +579,4 @@ pub const RasterOperation = enum(u32) {
     SRCPAINT,
     WHITENESS,
 };
+
