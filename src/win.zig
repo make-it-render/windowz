@@ -584,3 +584,108 @@ pub const RasterOperation = enum(u32) {
     WHITENESS,
 };
 
+// === System tray (Shell_NotifyIcon)
+//
+// The tray is driven by sending NOTIFYICONDATAW structs to
+// Shell_NotifyIconW(NIM_ADD/MODIFY/DELETE). Callbacks come back as
+// window messages with `uCallbackMessage` (typically WM_USER+1) on the
+// hidden HWND_MESSAGE-parented window we created. The lParam of those
+// messages carries the actual mouse-button event.
+
+pub extern "shell32" fn Shell_NotifyIconW(
+    dwMessage: u32,
+    lpData: *NotifyIconData,
+) callconv(.winapi) Bool;
+
+pub const NIM_ADD: u32 = 0x00000000;
+pub const NIM_MODIFY: u32 = 0x00000001;
+pub const NIM_DELETE: u32 = 0x00000002;
+pub const NIM_SETFOCUS: u32 = 0x00000003;
+pub const NIM_SETVERSION: u32 = 0x00000004;
+
+pub const NIF_MESSAGE: u32 = 0x00000001;
+pub const NIF_ICON: u32 = 0x00000002;
+pub const NIF_TIP: u32 = 0x00000004;
+pub const NIF_STATE: u32 = 0x00000008;
+pub const NIF_INFO: u32 = 0x00000010;
+pub const NIF_GUID: u32 = 0x00000020;
+pub const NIF_REALTIME: u32 = 0x00000040;
+pub const NIF_SHOWTIP: u32 = 0x00000080;
+
+/// The version 4 notification protocol — packs (x, y) in lParam and
+/// sends WM_CONTEXTMENU for right-clicks.
+pub const NOTIFYICON_VERSION_4: u32 = 4;
+
+pub const NotifyIconData = extern struct {
+    cbSize: u32 = @sizeOf(@This()),
+    hWnd: ?WindowHandle,
+    uID: u32,
+    uFlags: u32,
+    uCallbackMessage: u32 = 0,
+    hIcon: ?IconHandler = null,
+    /// Wide-string tooltip (NUL-terminated, max 128 chars including NUL).
+    szTip: [128]u16 = [_]u16{0} ** 128,
+    dwState: u32 = 0,
+    dwStateMask: u32 = 0,
+    /// Balloon tip body (rarely used by us).
+    szInfo: [256]u16 = [_]u16{0} ** 256,
+    /// Either uTimeout or uVersion depending on context. We use uVersion.
+    uVersion: u32 = 0,
+    szInfoTitle: [64]u16 = [_]u16{0} ** 64,
+    dwInfoFlags: u32 = 0,
+    guidItem: [16]u8 = [_]u8{0} ** 16,
+    hBalloonIcon: ?IconHandler = null,
+};
+
+/// Special parent value for message-only windows (no painting / focus,
+/// receive messages only). C: `((HWND)-3)`.
+pub const HWND_MESSAGE: ?WindowHandle = @ptrFromInt(@as(usize, @bitCast(@as(isize, -3))));
+
+// === Popup menus (right-click context menu support)
+
+pub extern "user32" fn CreatePopupMenu() callconv(.winapi) ?MenuHandler;
+pub extern "user32" fn DestroyMenu(hMenu: ?MenuHandler) callconv(.winapi) Bool;
+
+pub extern "user32" fn AppendMenuW(
+    hMenu: ?MenuHandler,
+    uFlags: u32,
+    uIDNewItem: usize,
+    lpNewItem: ?String,
+) callconv(.winapi) Bool;
+
+pub extern "user32" fn TrackPopupMenu(
+    hMenu: ?MenuHandler,
+    uFlags: u32,
+    x: i32,
+    y: i32,
+    nReserved: i32,
+    hWnd: ?WindowHandle,
+    prcRect: ?*const Rect,
+) callconv(.winapi) Bool;
+
+pub const MF_STRING: u32 = 0x00000000;
+pub const MF_BITMAP: u32 = 0x00000004;
+pub const MF_GRAYED: u32 = 0x00000001;
+pub const MF_DISABLED: u32 = 0x00000002;
+pub const MF_CHECKED: u32 = 0x00000008;
+pub const MF_POPUP: u32 = 0x00000010;
+pub const MF_SEPARATOR: u32 = 0x00000800;
+
+pub const TPM_LEFTBUTTON: u32 = 0x0000;
+pub const TPM_RIGHTBUTTON: u32 = 0x0002;
+pub const TPM_LEFTALIGN: u32 = 0x0000;
+pub const TPM_RETURNCMD: u32 = 0x0100;
+pub const TPM_NONOTIFY: u32 = 0x0080;
+
+// === Foreground / cursor
+
+pub extern "user32" fn SetForegroundWindow(hWnd: ?WindowHandle) callconv(.winapi) Bool;
+pub extern "user32" fn GetCursorPos(point: *Point) callconv(.winapi) Bool;
+
+// === Tray-related message constants
+
+pub const WM_USER: u32 = 0x0400;
+pub const WM_COMMAND: u32 = 0x0111;
+pub const WM_CONTEXTMENU: u32 = 0x007B;
+pub const WM_NULL: u32 = 0x0000;
+
