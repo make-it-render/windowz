@@ -7,10 +7,8 @@ const log = std.log.scoped(.main);
 
 var frame_handle: ?win.DeviceContext = null;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(gpa.deinit() != .leak);
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     // Get our own program instance handle.
     const instance = win.GetModuleHandleW(null);
@@ -142,7 +140,6 @@ pub fn windowProc(
         },
         .WM_PAINT => {
             while (win.ShowCursor(true) < 1) {}
-            var timer = std.time.Timer.start() catch unreachable;
 
             // The paint struct will receive paint specs from BeginPaint.
             var paint = std.mem.zeroes(win.Paint);
@@ -187,7 +184,6 @@ pub fn windowProc(
             }
 
             _ = win.DwmFlush(); // wait for vsync, kinda
-            log.debug("PAINT TIME {d}ms", .{timer.lap() / std.time.ns_per_ms});
         },
         .WM_SIZE => {},
         .WM_MOUSEMOVE => {

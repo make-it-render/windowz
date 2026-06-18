@@ -185,9 +185,11 @@ pub const WindowClass = extern struct {
 };
 
 pub const ExtendedWindowStyle = enum(u32) {
+    None = 0x00000000,
     OverlappedWindow = 0x00000300,
     ClientEdge = 0x00000200,
     WindowEdge = 0x00000100,
+    _,
 };
 
 pub const WindowStyle = enum(u32) {
@@ -201,6 +203,7 @@ pub const WindowStyle = enum(u32) {
     ThickFrame = 0x00040000,
     OverlappedWindow = 0x00CF0000,
     Overlapped = 0x00000000,
+    _,
 };
 
 pub const ClassStyle = enum(u32) {
@@ -498,6 +501,7 @@ pub extern "user32" fn MonitorFromWindow(hwnd: ?WindowHandle, dwFlags: u32) call
 pub extern "user32" fn GetMonitorInfoW(hMonitor: ?Monitor, lpmi: *MonitorInfo) callconv(.winapi) bool;
 
 pub const GWL_STYLE: c_int = -16;
+pub const GWLP_USERDATA: c_int = -21;
 pub const HWND_TOP: ?WindowHandle = null;
 pub const SWP_FRAMECHANGED: u32 = 0x0020;
 pub const SWP_NOOWNERZORDER: u32 = 0x0200;
