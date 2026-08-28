@@ -58,6 +58,14 @@ pub const IID_IAudioRenderClient: Guid = .{
     .data4 = .{ 0xA7, 0xBF, 0xAD, 0xDC, 0xA7, 0xC2, 0x60, 0xE2 },
 };
 
+/// {726778CD-F60A-4EDA-82DE-E47610CD78AA}
+pub const IID_IAudioClient2: Guid = .{
+    .data1 = 0x726778CD,
+    .data2 = 0xF60A,
+    .data3 = 0x4EDA,
+    .data4 = .{ 0x82, 0xDE, 0xE4, 0x76, 0x10, 0xCD, 0x78, 0xAA },
+};
+
 /// {C8ADBD64-E71E-48A0-A4DE-185C395CD317}
 pub const IID_IAudioCaptureClient: Guid = .{
     .data1 = 0xC8ADBD64,
@@ -314,6 +322,69 @@ pub const IAudioRenderClient = extern struct {
     }
 };
 
+/// `AUDIO_STREAM_CATEGORY`: what a stream is for, which decides what
+/// processing Windows puts on it. Communications streams get the voice
+/// pipeline — echo cancellation where the driver provides it — and duck
+/// other audio while active, as the user's Sound settings allow.
+pub const StreamCategory = enum(c_int) {
+    other = 0,
+    communications = 3,
+    media = 5,
+    game_effects = 6,
+    game_media = 8,
+    game_chat = 9,
+    speech = 10,
+};
+
+pub const STREAMOPTIONS_NONE: u32 = 0;
+/// Ask for the device's raw stream, with no processing at all.
+pub const STREAMOPTIONS_RAW: u32 = 1;
+
+/// `AudioClientProperties`, handed to `IAudioClient2.setClientProperties`
+/// before `initialize`.
+pub const AudioClientProperties = extern struct {
+    cbSize: u32 = @sizeOf(AudioClientProperties),
+    bIsOffload: i32 = 0,
+    eCategory: StreamCategory = .other,
+    options: u32 = STREAMOPTIONS_NONE,
+};
+
+/// IAudioClient with the stream-category methods appended. It inherits
+/// IAudioClient, so a pointer to it is a pointer to an IAudioClient — the
+/// twelve original slots come first.
+pub const IAudioClient2 = extern struct {
+    vtable: *const VTable,
+
+    pub const VTable = extern struct {
+        unknown: UnknownMethods(IAudioClient2),
+        initialize: *const fn (*IAudioClient2, ShareMode, u32, ReferenceTime, ReferenceTime, *const WaveFormatEx, ?*const Guid) callconv(.winapi) HResult,
+        getBufferSize: *const fn (*IAudioClient2, *u32) callconv(.winapi) HResult,
+        getStreamLatency: *const fn (*IAudioClient2, *ReferenceTime) callconv(.winapi) HResult,
+        getCurrentPadding: *const fn (*IAudioClient2, *u32) callconv(.winapi) HResult,
+        isFormatSupported: *const fn (*IAudioClient2, ShareMode, *const WaveFormatEx, ?*?*WaveFormatEx) callconv(.winapi) HResult,
+        getMixFormat: *const fn (*IAudioClient2, *?*WaveFormatEx) callconv(.winapi) HResult,
+        getDevicePeriod: *const fn (*IAudioClient2, ?*ReferenceTime, ?*ReferenceTime) callconv(.winapi) HResult,
+        start: *const fn (*IAudioClient2) callconv(.winapi) HResult,
+        stop: *const fn (*IAudioClient2) callconv(.winapi) HResult,
+        reset: *const fn (*IAudioClient2) callconv(.winapi) HResult,
+        setEventHandle: *const fn (*IAudioClient2, Handle) callconv(.winapi) HResult,
+        getService: *const fn (*IAudioClient2, *const Guid, *?*anyopaque) callconv(.winapi) HResult,
+        isOffloadCapable: *const fn (*IAudioClient2, StreamCategory, *i32) callconv(.winapi) HResult,
+        setClientProperties: *const fn (*IAudioClient2, *const AudioClientProperties) callconv(.winapi) HResult,
+        getBufferSizeLimits: *const fn (*IAudioClient2, *const WaveFormatEx, i32, *ReferenceTime, *ReferenceTime) callconv(.winapi) HResult,
+    };
+
+    /// Must come before `initialize`; afterwards it is refused.
+    pub fn setClientProperties(self: *@This(), properties: *const AudioClientProperties) !void {
+        try check(self.vtable.setClientProperties(self, properties));
+    }
+
+    /// The same object as an IAudioClient, for everything else.
+    pub fn asAudioClient(self: *@This()) *IAudioClient {
+        return @ptrCast(self);
+    }
+};
+
 pub const IAudioCaptureClient = extern struct {
     vtable: *const VTable,
 
@@ -533,6 +604,13 @@ test "the COM structs are laid out as the ABI expects" {
     try std.testing.expectEqual(@as(usize, 18), @offsetOf(WaveFormatExtensible, "samples"));
     try std.testing.expectEqual(@as(usize, 20), @offsetOf(WaveFormatExtensible, "channelMask"));
     try std.testing.expectEqual(@as(usize, 24), @offsetOf(WaveFormatExtensible, "subFormat"));
+
+    // Four 32-bit fields; the engine checks cbSize against it.
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(AudioClientProperties));
+    try std.testing.expectEqual(@as(u32, 16), (AudioClientProperties{}).cbSize);
+    // IAudioClient2's table is IAudioClient's plus three: the inheritance the
+    // pointer cast in `asAudioClient` relies on.
+    try std.testing.expectEqual(@sizeOf(IAudioClient.VTable) + 3 * @sizeOf(usize), @sizeOf(IAudioClient2.VTable));
 }
 
 test "a failed HRESULT becomes an error and a successful one does not" {

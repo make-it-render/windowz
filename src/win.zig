@@ -692,7 +692,9 @@ pub const WM_NULL: u32 = 0x0000;
 /// WASAPI audio output. Raw COM bindings — playback policy belongs to whoever
 /// uses them.
 pub const wasapi = @import("wasapi.zig");
+pub const mf = @import("mf.zig");
 
 test {
     _ = wasapi;
+    _ = mf;
 }
