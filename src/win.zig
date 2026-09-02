@@ -710,6 +710,61 @@ pub const WM_COMMAND: u32 = 0x0111;
 pub const WM_CONTEXTMENU: u32 = 0x007B;
 pub const WM_NULL: u32 = 0x0000;
 
+// === Registry and system parameters
+//
+// `RegGetValueW` opens, reads and closes a key in one call and checks the value's
+// type against `flags`. The set and delete calls exist so a read can be verified
+// against a value this process wrote.
+
+pub const RegistryKey = *opaque {};
+pub const HKEY_CURRENT_USER: RegistryKey = @ptrFromInt(0x80000001);
+pub const HKEY_LOCAL_MACHINE: RegistryKey = @ptrFromInt(0x80000002);
+
+pub const REG_DWORD: u32 = 4;
+pub const RRF_RT_REG_DWORD: u32 = 0x10;
+pub const ERROR_SUCCESS: i32 = 0;
+pub const ERROR_FILE_NOT_FOUND: i32 = 2;
+
+pub extern "advapi32" fn RegGetValueW(
+    key: RegistryKey,
+    subkey: ?String,
+    value: ?String,
+    flags: u32,
+    value_type: ?*u32,
+    data: ?*anyopaque,
+    data_size: ?*u32,
+) callconv(.winapi) i32;
+pub extern "advapi32" fn RegSetKeyValueW(
+    key: RegistryKey,
+    subkey: ?String,
+    value: ?String,
+    value_type: u32,
+    data: ?*const anyopaque,
+    data_size: u32,
+) callconv(.winapi) i32;
+pub extern "advapi32" fn RegDeleteKeyValueW(key: RegistryKey, subkey: ?String, value: ?String) callconv(.winapi) i32;
+pub extern "advapi32" fn RegDeleteKeyW(key: RegistryKey, subkey: String) callconv(.winapi) i32;
+
+/// The DWORD at `subkey\value` under `key`, or null when the value is missing or not a DWORD.
+pub fn registryDword(key: RegistryKey, subkey: String, value: String) ?u32 {
+    var data: u32 = 0;
+    var size: u32 = @sizeOf(u32);
+    if (RegGetValueW(key, subkey, value, RRF_RT_REG_DWORD, null, &data, &size) != ERROR_SUCCESS) return null;
+    return data;
+}
+
+pub extern "user32" fn SystemParametersInfoW(action: u32, param: u32, data: ?*anyopaque, update: u32) callconv(.winapi) Bool;
+
+/// Whether client-area animations (fades, slides) are enabled in the accessibility settings.
+pub const SPI_GETCLIENTAREAANIMATION: u32 = 0x1042;
+
+/// The system's client-area animation setting; null when the query fails.
+pub fn clientAreaAnimation() ?bool {
+    var enabled: Bool = .not_ok;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0) != .ok) return null;
+    return enabled != .not_ok;
+}
+
 /// WASAPI audio output. Raw COM bindings — playback policy belongs to whoever
 /// uses them.
 pub const wasapi = @import("wasapi.zig");
@@ -746,4 +801,26 @@ test "clipboard round trip" {
     try std.testing.expect(GlobalSize(read_block) >= bytes);
     const units: []const u16 = @alignCast(std.mem.bytesAsSlice(u16, read_memory[0..bytes]));
     try std.testing.expectEqualSlices(u16, text[0 .. text.len + 1], units);
+}
+
+// A DWORD written under HKCU comes back through `registryDword`; a missing value is null. Runs under Wine like the clipboard test.
+test "registry DWORD round trip" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const std = @import("std");
+    const subkey = W2("Software\\mir-windowz-test");
+    const value = W2("Answer");
+    const written: u32 = 42;
+
+    try std.testing.expectEqual(ERROR_SUCCESS, RegSetKeyValueW(HKEY_CURRENT_USER, subkey, value, REG_DWORD, &written, @sizeOf(u32)));
+    defer _ = RegDeleteKeyW(HKEY_CURRENT_USER, subkey);
+    try std.testing.expectEqual(@as(?u32, written), registryDword(HKEY_CURRENT_USER, subkey, value));
+
+    try std.testing.expectEqual(ERROR_SUCCESS, RegDeleteKeyValueW(HKEY_CURRENT_USER, subkey, value));
+    try std.testing.expectEqual(@as(?u32, null), registryDword(HKEY_CURRENT_USER, subkey, value));
+    try std.testing.expectEqual(@as(?u32, null), registryDword(HKEY_CURRENT_USER, subkey, W2("Missing")));
+}
+
+test "client-area animation setting is readable" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    try @import("std").testing.expect(clientAreaAnimation() != null);
 }
