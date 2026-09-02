@@ -320,6 +320,27 @@ pub extern "user32" fn SetCursor(
 
 pub const CursorHandler = *anyopaque;
 
+// === Clipboard
+//
+// The clipboard is a global store the system serializes: open it (any thread), replace or
+// read its contents, close it. Text goes in as CF_UNICODETEXT in a movable global block
+// that the system owns once SetClipboardData succeeds.
+
+pub extern "user32" fn OpenClipboard(hWndNewOwner: ?WindowHandle) callconv(.winapi) i32;
+pub extern "user32" fn CloseClipboard() callconv(.winapi) i32;
+pub extern "user32" fn EmptyClipboard() callconv(.winapi) i32;
+pub extern "user32" fn SetClipboardData(uFormat: u32, hMem: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+pub extern "user32" fn GetClipboardData(uFormat: u32) callconv(.winapi) ?*anyopaque;
+pub extern "user32" fn IsClipboardFormatAvailable(format: u32) callconv(.winapi) i32;
+pub extern "kernel32" fn GlobalAlloc(uFlags: u32, dwBytes: usize) callconv(.winapi) ?*anyopaque;
+pub extern "kernel32" fn GlobalLock(hMem: *anyopaque) callconv(.winapi) ?[*]u8;
+pub extern "kernel32" fn GlobalUnlock(hMem: *anyopaque) callconv(.winapi) i32;
+pub extern "kernel32" fn GlobalFree(hMem: *anyopaque) callconv(.winapi) ?*anyopaque;
+pub extern "kernel32" fn GlobalSize(hMem: *anyopaque) callconv(.winapi) usize;
+
+pub const CF_UNICODETEXT: u32 = 13;
+pub const GMEM_MOVEABLE: u32 = 0x0002;
+
 // === Icons
 
 pub extern "user32" fn CreateIconIndirect(piconinfo: *IconInfo) callconv(.winapi) ?IconHandler;
@@ -697,4 +718,32 @@ pub const mf = @import("mf.zig");
 test {
     _ = wasapi;
     _ = mf;
+}
+
+// A live round trip through the system clipboard; runs under Wine with
+// `zig build test -Dtarget=x86_64-windows -fwine`.
+test "clipboard round trip" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const std = @import("std");
+    const text = W2("mir clipboard round trip");
+    const bytes = (text.len + 1) * @sizeOf(u16);
+
+    try std.testing.expect(OpenClipboard(null) != 0);
+    try std.testing.expect(EmptyClipboard() != 0);
+    const block = GlobalAlloc(GMEM_MOVEABLE, bytes) orelse return error.OutOfMemory;
+    const memory = GlobalLock(block) orelse return error.LockFailed;
+    @memcpy(memory[0..bytes], std.mem.sliceAsBytes(text[0 .. text.len + 1]));
+    _ = GlobalUnlock(block);
+    try std.testing.expect(SetClipboardData(CF_UNICODETEXT, block) != null);
+    try std.testing.expect(CloseClipboard() != 0);
+
+    try std.testing.expect(OpenClipboard(null) != 0);
+    defer _ = CloseClipboard();
+    try std.testing.expect(IsClipboardFormatAvailable(CF_UNICODETEXT) != 0);
+    const read_block = GetClipboardData(CF_UNICODETEXT) orelse return error.NoData;
+    const read_memory = GlobalLock(read_block) orelse return error.LockFailed;
+    defer _ = GlobalUnlock(read_block);
+    try std.testing.expect(GlobalSize(read_block) >= bytes);
+    const units: []const u16 = @alignCast(std.mem.bytesAsSlice(u16, read_memory[0..bytes]));
+    try std.testing.expectEqualSlices(u16, text[0 .. text.len + 1], units);
 }
