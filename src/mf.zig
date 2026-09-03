@@ -278,6 +278,17 @@ pub const IMFMediaSource = extern struct {
     pub fn release(self: *@This()) void {
         _ = self.vtable.unknown.release(self);
     }
+
+    /// Another of the source's interfaces — `IAMCameraControl`, say — or
+    /// null when it has none such. The caller releases the result.
+    pub fn queryInterface(self: *@This(), comptime Interface: type, iid: *const Guid) !?*Interface {
+        var out: ?*anyopaque = null;
+        check(self.vtable.unknown.queryInterface(self, iid, &out)) catch |err| switch (err) {
+            error.NoInterface => return null,
+            else => return err,
+        };
+        return @ptrCast(@alignCast(out orelse return null));
+    }
 };
 
 pub const IMFSourceReader = extern struct {
@@ -413,6 +424,141 @@ pub const IMFMediaBuffer = extern struct {
     }
 };
 
+// ── camera controls ─────────────────────────────────────────────────────────
+//
+// `IAMCameraControl` and `IAMVideoProcAmp` are DirectShow interfaces
+// (`strmif.h`), but a capture device's Media Foundation source implements
+// them as well: `IMFMediaSource.queryInterface` is how a caller reaches a
+// webcam's exposure, focus, brightness and the rest. Each property carries its
+// own automatic/manual flag; there is no list to walk, only `getRange` to ask
+// whether the device has a given property.
+
+/// {C6E13370-30AC-11D0-A18C-00A0C9118956}
+pub const IID_IAMCameraControl = guid(0xC6E13370, 0x30AC, 0x11D0, .{ 0xA1, 0x8C, 0x00, 0xA0, 0xC9, 0x11, 0x89, 0x56 });
+/// {C6E13360-30AC-11D0-A18C-00A0C9118956}
+pub const IID_IAMVideoProcAmp = guid(0xC6E13360, 0x30AC, 0x11D0, .{ 0xA1, 0x8C, 0x00, 0xA0, 0xC9, 0x11, 0x89, 0x56 });
+
+/// `CameraControlProperty`. Exposure is in log2 seconds (−3 is 1/8 s), the
+/// motor properties in the device's own units.
+pub const CameraControlProperty = enum(i32) {
+    pan = 0,
+    tilt = 1,
+    roll = 2,
+    zoom = 3,
+    exposure = 4,
+    iris = 5,
+    focus = 6,
+};
+
+/// `VideoProcAmpProperty`.
+pub const VideoProcAmpProperty = enum(i32) {
+    brightness = 0,
+    contrast = 1,
+    hue = 2,
+    saturation = 3,
+    sharpness = 4,
+    gamma = 5,
+    color_enable = 6,
+    white_balance = 7,
+    backlight_compensation = 8,
+    gain = 9,
+};
+
+/// `CameraControl_Flags` and `VideoProcAmp_Flags` share their two bits: in
+/// `getRange`'s capabilities, which modes a property offers; in `get` and
+/// `set`, which mode it is in.
+pub const CONTROL_FLAGS_AUTO: i32 = 0x1;
+pub const CONTROL_FLAGS_MANUAL: i32 = 0x2;
+
+/// `E_PROP_ID_UNSUPPORTED` — the device has no such property, which is how
+/// `GetRange` answers for every property a camera lacks.
+pub const E_PROP_ID_UNSUPPORTED: u32 = 0x80070490;
+/// `E_PROP_SET_UNSUPPORTED` — the device has no such interface at all.
+pub const E_PROP_SET_UNSUPPORTED: u32 = 0x80070492;
+/// `E_INVALIDARG` — a value the property cannot take.
+pub const E_INVALIDARG: u32 = 0x80070057;
+
+pub const ControlRange = struct {
+    min: i32,
+    max: i32,
+    step: i32,
+    default: i32,
+    /// `CONTROL_FLAGS_*`: the modes the property offers.
+    capabilities: i32,
+};
+
+pub const ControlValue = struct {
+    value: i32,
+    /// `CONTROL_FLAGS_*`: the mode the property is in.
+    flags: i32,
+};
+
+/// The three methods both control interfaces declare, in order, over `Self`.
+fn ControlMethods(comptime Self: type) type {
+    return extern struct {
+        getRange: *const fn (*Self, i32, *i32, *i32, *i32, *i32, *i32) callconv(.winapi) HResult,
+        set: *const fn (*Self, i32, i32, i32) callconv(.winapi) HResult,
+        get: *const fn (*Self, i32, *i32, *i32) callconv(.winapi) HResult,
+    };
+}
+
+pub const ControlInterfaceKind = enum { camera_control, video_proc_amp };
+
+/// The two control interfaces have the same shape, so one definition serves
+/// both; `which` keeps them distinct types, since each answers to its own IID.
+fn ControlInterface(comptime which: ControlInterfaceKind) type {
+    return extern struct {
+        vtable: *const VTable,
+
+        pub const kind = which;
+        const Self = @This();
+
+        pub const VTable = extern struct {
+            unknown: UnknownMethods(Self),
+            control: ControlMethods(Self),
+        };
+
+        /// A property's bounds and the modes it offers, or null when the
+        /// device has no such property.
+        pub fn getRange(self: *Self, property: i32) !?ControlRange {
+            var range: ControlRange = undefined;
+            const result = self.vtable.control.getRange(self, property, &range.min, &range.max, &range.step, &range.default, &range.capabilities);
+            if (isUnsupportedProperty(result)) return null;
+            try check(result);
+            return range;
+        }
+
+        pub fn get(self: *Self, property: i32) !ControlValue {
+            var value: ControlValue = undefined;
+            const result = self.vtable.control.get(self, property, &value.value, &value.flags);
+            if (isUnsupportedProperty(result)) return error.UnknownProperty;
+            try check(result);
+            return value;
+        }
+
+        /// `flags` is `CONTROL_FLAGS_AUTO` or `CONTROL_FLAGS_MANUAL`; the
+        /// value only matters in manual mode.
+        pub fn set(self: *Self, property: i32, value: i32, flags: i32) !void {
+            const result = self.vtable.control.set(self, property, value, flags);
+            if (isUnsupportedProperty(result)) return error.UnknownProperty;
+            if (@as(u32, @bitCast(@intFromEnum(result))) == E_INVALIDARG) return error.InvalidArgument;
+            try check(result);
+        }
+
+        pub fn release(self: *Self) void {
+            _ = self.vtable.unknown.release(self);
+        }
+    };
+}
+
+fn isUnsupportedProperty(result: HResult) bool {
+    const code: u32 = @bitCast(@intFromEnum(result));
+    return code == E_PROP_ID_UNSUPPORTED or code == E_PROP_SET_UNSUPPORTED;
+}
+
+pub const IAMCameraControl = ControlInterface(.camera_control);
+pub const IAMVideoProcAmp = ControlInterface(.video_proc_amp);
+
 /// `MFCreateAttributes` plus the one attribute device enumeration needs.
 pub fn createVideoCaptureAttributes() !*IMFAttributes {
     var out: ?*IMFAttributes = null;
@@ -450,7 +596,23 @@ test "the vtables have the slot counts the C++ declarations do" {
     try std.testing.expectEqual(13 * slot, @sizeOf(IMFMediaSource.VTable));
     try std.testing.expectEqual(13 * slot, @sizeOf(IMFSourceReader.VTable));
     try std.testing.expectEqual(8 * slot, @sizeOf(IMFMediaBuffer.VTable));
+    // IUnknown 3 + GetRange, Set, Get.
+    try std.testing.expectEqual(6 * slot, @sizeOf(IAMCameraControl.VTable));
+    try std.testing.expectEqual(6 * slot, @sizeOf(IAMVideoProcAmp.VTable));
+    try std.testing.expect(IAMCameraControl != IAMVideoProcAmp);
     // A subtype is its FOURCC over the fixed tail.
     try std.testing.expectEqual(@as(u32, 0x3231564E), MFVideoFormat_NV12.data1);
     try std.testing.expectEqual(MFMediaType_Video.data4, MFVideoFormat_NV12.data4);
+}
+
+test "control properties and flags carry strmif.h's values" {
+    try std.testing.expectEqual(@as(i32, 4), @intFromEnum(CameraControlProperty.exposure));
+    try std.testing.expectEqual(@as(i32, 6), @intFromEnum(CameraControlProperty.focus));
+    try std.testing.expectEqual(@as(i32, 7), @intFromEnum(VideoProcAmpProperty.white_balance));
+    try std.testing.expectEqual(@as(i32, 9), @intFromEnum(VideoProcAmpProperty.gain));
+    try std.testing.expectEqual(@as(i32, 3), CONTROL_FLAGS_AUTO | CONTROL_FLAGS_MANUAL);
+    // The two IIDs differ only in their first word.
+    try std.testing.expectEqual(IID_IAMCameraControl.data4, IID_IAMVideoProcAmp.data4);
+    try std.testing.expect(isUnsupportedProperty(@enumFromInt(@as(i32, @bitCast(E_PROP_ID_UNSUPPORTED)))));
+    try std.testing.expect(!isUnsupportedProperty(.ok));
 }
