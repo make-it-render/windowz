@@ -269,6 +269,9 @@ pub const MessageType = enum(u32) {
     WM_SETCURSOR = 0x0020,
     WM_ERASEBKGND = 0x0014,
     WM_DPICHANGED = 0x02E0,
+    /// The clipboard's contents changed; sent to every window registered with
+    /// AddClipboardFormatListener, whoever changed it.
+    WM_CLIPBOARDUPDATE = 0x031D,
     _,
 };
 
@@ -337,6 +340,14 @@ pub extern "kernel32" fn GlobalLock(hMem: *anyopaque) callconv(.winapi) ?[*]u8;
 pub extern "kernel32" fn GlobalUnlock(hMem: *anyopaque) callconv(.winapi) i32;
 pub extern "kernel32" fn GlobalFree(hMem: *anyopaque) callconv(.winapi) ?*anyopaque;
 pub extern "kernel32" fn GlobalSize(hMem: *anyopaque) callconv(.winapi) usize;
+
+/// Ask for WM_CLIPBOARDUPDATE on `hwnd` whenever the clipboard changes. The system drops the
+/// registration with the window; RemoveClipboardFormatListener is for dropping it earlier.
+pub extern "user32" fn AddClipboardFormatListener(hwnd: WindowHandle) callconv(.winapi) i32;
+pub extern "user32" fn RemoveClipboardFormatListener(hwnd: WindowHandle) callconv(.winapi) i32;
+/// A counter the system bumps on every clipboard change (0 when the caller may not see the
+/// clipboard): what tells one change from another, and our own from somebody else's.
+pub extern "user32" fn GetClipboardSequenceNumber() callconv(.winapi) u32;
 
 pub const CF_UNICODETEXT: u32 = 13;
 pub const GMEM_MOVEABLE: u32 = 0x0002;
