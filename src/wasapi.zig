@@ -324,8 +324,17 @@ pub const IAudioRenderClient = extern struct {
 
 /// `AUDIO_STREAM_CATEGORY`: what a stream is for, which decides what
 /// processing Windows puts on it. Communications streams get the voice
-/// pipeline — echo cancellation where the driver provides it — and duck
-/// other audio while active, as the user's Sound settings allow.
+/// pipeline — echo cancellation, noise suppression and gain control where
+/// the driver or OEM provides them as APOs — and duck other audio while
+/// active, as the user's Sound settings allow.
+///
+/// Two caveats a caller relying on `.communications` for echo cancellation
+/// must know. The processing is opt-in and driver-dependent, and nothing
+/// before Windows 11's `IAudioEffectsManager` says whether any is in place:
+/// on an older system the category can be set and verified only by
+/// measuring the result. And the category is what triggers "communications
+/// ducking" — Windows lowering every other application while the stream is
+/// open — unless the user has turned that off in Sound settings.
 pub const StreamCategory = enum(c_int) {
     other = 0,
     communications = 3,
@@ -336,12 +345,20 @@ pub const StreamCategory = enum(c_int) {
     speech = 10,
 };
 
+/// `AUDCLNT_STREAMOPTIONS`, a set of flags.
 pub const STREAMOPTIONS_NONE: u32 = 0;
 /// Ask for the device's raw stream, with no processing at all.
 pub const STREAMOPTIONS_RAW: u32 = 1;
+/// Initialize in the device's own format rather than the engine's mix
+/// format (Windows 10 and later).
+pub const STREAMOPTIONS_MATCH_FORMAT: u32 = 2;
+/// The stream carries ambisonics (Windows 10 1703 and later).
+pub const STREAMOPTIONS_AMBISONICS: u32 = 4;
 
 /// `AudioClientProperties`, handed to `IAudioClient2.setClientProperties`
-/// before `initialize`.
+/// before `initialize`. Sixteen bytes: the layout Windows 8.1 and later
+/// read, with `options` on the end — Windows 8's twelve-byte form is not
+/// bound.
 pub const AudioClientProperties = extern struct {
     cbSize: u32 = @sizeOf(AudioClientProperties),
     bIsOffload: i32 = 0,
@@ -351,7 +368,9 @@ pub const AudioClientProperties = extern struct {
 
 /// IAudioClient with the stream-category methods appended. It inherits
 /// IAudioClient, so a pointer to it is a pointer to an IAudioClient — the
-/// twelve original slots come first.
+/// twelve original slots come first. Windows 8 and later; activating it on
+/// an older system fails with `error.NoInterface`, and a caller falls back
+/// to a plain IAudioClient.
 pub const IAudioClient2 = extern struct {
     vtable: *const VTable,
 
@@ -377,6 +396,14 @@ pub const IAudioClient2 = extern struct {
     /// Must come before `initialize`; afterwards it is refused.
     pub fn setClientProperties(self: *@This(), properties: *const AudioClientProperties) !void {
         try check(self.vtable.setClientProperties(self, properties));
+    }
+
+    /// Whether the device can take a stream of `category` on its hardware
+    /// offload path. Informational; the audio library never offloads.
+    pub fn isOffloadCapable(self: *@This(), category: StreamCategory) !bool {
+        var capable: i32 = 0;
+        try check(self.vtable.isOffloadCapable(self, category, &capable));
+        return capable != 0;
     }
 
     /// The same object as an IAudioClient, for everything else.
@@ -608,9 +635,22 @@ test "the COM structs are laid out as the ABI expects" {
     // Four 32-bit fields; the engine checks cbSize against it.
     try std.testing.expectEqual(@as(usize, 16), @sizeOf(AudioClientProperties));
     try std.testing.expectEqual(@as(u32, 16), (AudioClientProperties{}).cbSize);
+    try std.testing.expectEqual(@as(usize, 4), @offsetOf(AudioClientProperties, "bIsOffload"));
+    try std.testing.expectEqual(@as(usize, 8), @offsetOf(AudioClientProperties, "eCategory"));
+    try std.testing.expectEqual(@as(usize, 12), @offsetOf(AudioClientProperties, "options"));
+    try std.testing.expectEqual(@as(usize, 4), @sizeOf(StreamCategory));
+    try std.testing.expectEqual(@as(c_int, 3), @intFromEnum(StreamCategory.communications));
     // IAudioClient2's table is IAudioClient's plus three: the inheritance the
-    // pointer cast in `asAudioClient` relies on.
+    // pointer cast in `asAudioClient` relies on. The three sit in the order
+    // audioclient.h declares them — a call through the wrong slot would
+    // land in GetBufferSizeLimits with a properties pointer for a format.
     try std.testing.expectEqual(@sizeOf(IAudioClient.VTable) + 3 * @sizeOf(usize), @sizeOf(IAudioClient2.VTable));
+    try std.testing.expectEqual(15 * @sizeOf(usize), @offsetOf(IAudioClient2.VTable, "isOffloadCapable"));
+    try std.testing.expectEqual(16 * @sizeOf(usize), @offsetOf(IAudioClient2.VTable, "setClientProperties"));
+    try std.testing.expectEqual(17 * @sizeOf(usize), @offsetOf(IAudioClient2.VTable, "getBufferSizeLimits"));
+    // The twelve IAudioClient slots line up between the two tables.
+    try std.testing.expectEqual(@offsetOf(IAudioClient.VTable, "getService"), @offsetOf(IAudioClient2.VTable, "getService"));
+    try std.testing.expectEqual(@offsetOf(IAudioClient.VTable, "initialize"), @offsetOf(IAudioClient2.VTable, "initialize"));
 }
 
 test "a failed HRESULT becomes an error and a successful one does not" {
