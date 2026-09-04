@@ -306,6 +306,42 @@ pub fn mouseWheelDelta(wparam: usize) i16 {
     return @bitCast(hiword2(wparam));
 }
 
+/// The physical state of a key or mouse button (`VK_LBUTTON` = 1, `VK_RBUTTON` = 2, `VK_MBUTTON` = 4) right now, from any thread: the sign bit is set while it is down. `GetKeyState` answers for the calling thread's own input queue instead.
+pub extern "user32" fn GetAsyncKeyState(key: c_int) callconv(.winapi) i16;
+
+pub const VK_LBUTTON: c_int = 0x01;
+pub const VK_RBUTTON: c_int = 0x02;
+pub const VK_MBUTTON: c_int = 0x04;
+
+// === Synthetic input
+
+/// Warp the pointer to a screen position.
+pub extern "user32" fn SetCursorPos(x: c_int, y: c_int) callconv(.winapi) Bool;
+/// Queue mouse and keyboard events as if the user made them; whatever the pointer is over receives them. `size` is `@sizeOf(Input)`.
+pub extern "user32" fn SendInput(count: u32, inputs: [*]const Input, size: c_int) callconv(.winapi) u32;
+
+pub const INPUT_MOUSE: u32 = 0;
+pub const MOUSEEVENTF_MOVE: u32 = 0x0001;
+pub const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
+pub const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
+pub const MOUSEEVENTF_ABSOLUTE: u32 = 0x8000;
+
+/// `MOUSEINPUT`: a relative move unless `flags` has `MOUSEEVENTF_ABSOLUTE`.
+pub const MouseInput = extern struct {
+    dx: i32 = 0,
+    dy: i32 = 0,
+    mouse_data: u32 = 0,
+    flags: u32,
+    time: u32 = 0,
+    extra_info: usize = 0,
+};
+
+/// `INPUT`, holding only the mouse member of its union, which is the largest.
+pub const Input = extern struct {
+    type: u32 = INPUT_MOUSE,
+    mouse: MouseInput,
+};
+
 // === Cursors
 
 pub extern "user32" fn LoadCursorW(
@@ -780,10 +816,21 @@ pub fn clientAreaAnimation() ?bool {
 /// uses them.
 pub const wasapi = @import("wasapi.zig");
 pub const mf = @import("mf.zig");
+/// OLE drag and drop: the interfaces a window implements to take and give drops.
+pub const ole = @import("ole.zig");
 
 test {
     _ = wasapi;
     _ = mf;
+    _ = ole;
+}
+
+test "the synthetic input structs are laid out as user32 expects" {
+    // winuser.h: five DWORD/LONG then a ULONG_PTR; INPUT puts its DWORD type before the union at pointer alignment.
+    const std = @import("std");
+    try std.testing.expectEqual(@as(usize, if (@sizeOf(usize) == 8) 32 else 24), @sizeOf(MouseInput));
+    try std.testing.expectEqual(@as(usize, if (@sizeOf(usize) == 8) 40 else 28), @sizeOf(Input));
+    try std.testing.expectEqual(@as(usize, @sizeOf(usize)), @offsetOf(Input, "mouse"));
 }
 
 // A live round trip through the system clipboard; runs under Wine with
