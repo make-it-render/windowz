@@ -1,9 +1,9 @@
 //! WASAPI — Windows audio output.
 //!
 //! Raw bindings only: this knows how to open a device and hand over a buffer,
-//! and nothing about mixing or about mir-audio. The audio library implements its
-//! own backend on top, the same way mir-pipewire stays a protocol client and
-//! mir-audio bridges it.
+//! and nothing about anyaudio. The audio library implements its
+//! own backend on top, the same way pipewirez stays a protocol client and
+//! anyaudio bridges it.
 //!
 //! WASAPI is COM all the way down, which Zig does not speak. A COM interface is
 //! a pointer to a vtable, every method takes the interface as its first
